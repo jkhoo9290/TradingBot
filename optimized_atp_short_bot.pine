@@ -41,18 +41,39 @@ confirmedHTF     = input.bool(true,      title="仅使用已确认高 TF", group
 
 lookaheadSetting = confirmedHTF ? barmerge.lookahead_on : barmerge.lookahead_off
 
+// === 工具函数 ===
+calcDirectional(len) =>
+    upMove   = high - high[1]
+    downMove = low[1] - low
+    plusDM   = upMove > downMove and upMove > 0 ? upMove : 0.0
+    minusDM  = downMove > upMove and downMove > 0 ? downMove : 0.0
+    tr       = math.max(math.max(high - low, math.abs(high - close[1])), math.abs(low - close[1]))
+    smoothedTR      = ta.rma(tr, len)
+    smoothedPlusDM  = ta.rma(plusDM, len)
+    smoothedMinusDM = ta.rma(minusDM, len)
+    plusDI   = smoothedTR == 0 ? 0 : 100 * smoothedPlusDM / smoothedTR
+    minusDI  = smoothedTR == 0 ? 0 : 100 * smoothedMinusDM / smoothedTR
+    denom    = plusDI + minusDI
+    dx       = denom == 0 ? 0 : 100 * math.abs(plusDI - minusDI) / denom
+    [plusDI, minusDI, ta.rma(dx, len)]
+
+calcAdxValue(len) =>
+    var float _plus = na
+    var float _minus = na
+    var float _adx = na
+    [_plus, _minus, _adx] = calcDirectional(len)
+    _adx
+
 // === 技术指标 ===
 atrValue   = ta.atr(atrPeriod)
 fastEma    = ta.ema(close, fastEmaLength)
 slowEma    = ta.ema(close, slowEmaLength)
 higherSlowEma = request.security(syminfo.tickerid, higherTF, ta.ema(close, slowEmaLength), lookahead=lookaheadSetting, gaps=barmerge.gaps_off)
 
-adx        = ta.adx(adxPeriod)
-plusDI     = ta.di_plus(adxPeriod)
-minusDI    = ta.di_minus(adxPeriod)
+[plusDI, minusDI, adx] = calcDirectional(adxPeriod)
 adxStrong  = adx > adxThreshold
 diAligned  = not diFilter or minusDI > plusDI
-higherADX  = request.security(syminfo.tickerid, higherTF_ADX, ta.adx(adxPeriod), lookahead=lookaheadSetting, gaps=barmerge.gaps_off)
+higherADX  = request.security(syminfo.tickerid, higherTF_ADX, calcAdxValue(adxPeriod), lookahead=lookaheadSetting, gaps=barmerge.gaps_off)
 higherADXStrong = not useHigherADXConfirm or higherADX > adxThreshold
 
 volumeMA   = ta.ema(volume, volumeLength)
