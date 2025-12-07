@@ -1,0 +1,126 @@
+//@version=5
+strategy(
+     title                = "ATP Short Bot + ADX TF (Optimized)",
+     overlay              = true,
+     pyramiding           = 0,
+     calc_on_every_tick   = false,
+     default_qty_type     = strategy.percent_of_equity,
+     default_qty_value    = 10,
+     initial_capital      = 10000
+)
+
+// === 输入参数 ===
+groupTrend      = "趋势与动量"
+groupFilters    = "过滤器"
+groupRisk       = "风控参数"
+groupMTF        = "多时间框架"
+
+sensitivity      = input.float(1.2,  title="ATR 灵敏度倍数", step=0.1, group=groupTrend)
+atrPeriod        = input.int(14,     title="ATR 周期", minval=1, group=groupTrend)
+fastEmaLength    = input.int(10,     title="快速 EMA", minval=1, group=groupTrend)
+slowEmaLength    = input.int(25,     title="慢速 EMA", minval=1, group=groupTrend)
+adxPeriod        = input.int(14,     title="ADX 周期", minval=5, group=groupTrend)
+adxThreshold     = input.float(22.0, title="ADX 阈值", minval=5, maxval=50, group=groupTrend)
+diFilter         = input.bool(true,  title="仅在 -DI > +DI 时做空", group=groupTrend)
+
+useVolumeFilter  = input.bool(true,  title="启用成交量过滤", group=groupFilters)
+volumeLength     = input.int(20,     title="成交量 EMA 周期", minval=1, group=groupFilters)
+volumeBoost      = input.float(1.05, title="成交量放大倍数", step=0.01, group=groupFilters)
+cooldownBars     = input.int(5,      title="开仓冷却（根）", minval=0, group=groupFilters)
+
+tpMultiplier     = input.float(2.0,  title="止盈 ATR 倍数", minval=0.5, group=groupRisk)
+slMultiplier     = input.float(1.0,  title="初始止损 ATR 倍数", minval=0.5, group=groupRisk)
+lockProfitTrigger= input.float(1.5,  title="锁盈触发 ATR 倍数", step=0.1, group=groupRisk)
+lockProfitDist   = input.float(1.2,  title="锁盈止损距离 ATR 倍数", step=0.1, group=groupRisk)
+useBreakEven     = input.bool(true,  title="先移保本再锁盈", group=groupRisk)
+useTrailTP       = input.bool(true,  title="启用移动止盈", group=groupRisk)
+ttpDist          = input.float(2.0,  title="移动止盈距离 ATR 倍数", step=0.1, group=groupRisk)
+
+higherTF         = input.timeframe("60",  title="趋势确认 TF (EMA)", group=groupMTF)
+higherTF_ADX     = input.timeframe("240", title="趋势确认 TF (ADX)", group=groupMTF)
+useHigherADXConfirm = input.bool(true,   title="启用高 TF ADX", group=groupMTF)
+confirmedHTF     = input.bool(true,      title="仅使用已确认高 TF", group=groupMTF)
+
+lookaheadSetting = confirmedHTF ? barmerge.lookahead_on : barmerge.lookahead_off
+
+// === 技术指标 ===
+atrValue   = ta.atr(atrPeriod)
+fastEma    = ta.ema(close, fastEmaLength)
+slowEma    = ta.ema(close, slowEmaLength)
+higherSlowEma = request.security(syminfo.tickerid, higherTF, ta.ema(close, slowEmaLength), lookahead=lookaheadSetting, gaps=barmerge.gaps_off)
+
+adx        = ta.adx(adxPeriod)
+plusDI     = ta.di_plus(adxPeriod)
+minusDI    = ta.di_minus(adxPeriod)
+adxStrong  = adx > adxThreshold
+diAligned  = not diFilter or minusDI > plusDI
+higherADX  = request.security(syminfo.tickerid, higherTF_ADX, ta.adx(adxPeriod), lookahead=lookaheadSetting, gaps=barmerge.gaps_off)
+higherADXStrong = not useHigherADXConfirm or higherADX > adxThreshold
+
+volumeMA   = ta.ema(volume, volumeLength)
+volumeSignal = not useVolumeFilter or volume > volumeMA * volumeBoost
+
+// === ATR 追踪止损（基于 Chandelier 思路） ===
+atrBandShort   = ta.highest(high, atrPeriod) - sensitivity * atrValue
+atrTrailingStop = ta.ema(atrBandShort, 2)
+
+// === 多条件过滤 ===
+bearishTrend      = fastEma < slowEma and close < slowEma and close < higherSlowEma
+mtfTrendConfirm   = close < higherSlowEma
+momentumAligned   = adxStrong and diAligned and higherADXStrong
+
+var int  lastEntryBar = na
+canEnter = na(lastEntryBar) or bar_index - lastEntryBar > cooldownBars or cooldownBars == 0
+
+sellSignal = ta.crossunder(close, atrTrailingStop) and bearishTrend and mtfTrendConfirm and momentumAligned and volumeSignal and canEnter and strategy.position_size >= 0
+
+// === 风控与出场 ===
+var float dynStop = na
+var float trailTP = na
+
+if strategy.position_size < 0
+    avgPrice    = strategy.position_avg_price
+    shortSL     = avgPrice + slMultiplier * atrValue
+    shortTP     = avgPrice - tpMultiplier * atrValue
+    profitPoints= avgPrice - close
+
+    dynStop := shortSL
+    if useBreakEven and profitPoints >= atrValue
+        dynStop := math.min(dynStop, avgPrice)
+    if profitPoints >= lockProfitTrigger * atrValue
+        lockStop = avgPrice - lockProfitDist * atrValue
+        dynStop := math.min(dynStop, lockStop)
+
+    if useTrailTP
+        trailTP := close - ttpDist * atrValue
+    else
+        trailTP := na
+
+    exitLimit = na(trailTP) ? shortTP : math.min(shortTP, trailTP)
+    strategy.exit("Exit Short", from_entry="Short", stop=dynStop, limit=exitLimit, comment="Managed Exit")
+else
+    dynStop := na
+    trailTP := na
+
+if sellSignal
+    strategy.entry("Short", strategy.short)
+    lastEntryBar := bar_index
+
+// === 可视化 ===
+plot(fastEma, color=color.new(color.blue, 0), title="快速 EMA")
+plot(slowEma, color=color.new(color.orange, 0), title="慢速 EMA")
+plot(higherSlowEma, color=color.new(color.orange, 60), title="高 TF 慢速 EMA")
+plot(atrTrailingStop, color=color.new(color.red, 0), title="ATR 追踪止损")
+plot(dynStop, color=color.new(color.purple, 0), title="动态锁盈止损")
+plot(trailTP, color=color.new(color.green, 0), title="移动止盈")
+plotshape(sellSignal, location=location.abovebar, color=color.red, style=shape.labeldown, text="SELL", title="做空信号")
+
+// === 信息面板 ===
+var label infoLabel = na
+if barstate.islast
+    label.delete(infoLabel)
+    txt = "ADX: " + str.tostring(adx, "#.0") + "\n"
+    txt += "高TF ADX: " + str.tostring(higherADX, "#.0") + "\n"
+    txt += "Volume EMA 比: " + str.tostring(volume / volumeMA, "#.2") + "\n"
+    txt += "冷却剩余: " + (canEnter ? "0" : str.tostring(cooldownBars - (bar_index - nz(lastEntryBar)), "#"))
+    infoLabel := label.new(bar_index, high, txt, style=label.style_label_left, textcolor=color.white, color=color.new(color.black, 0))
