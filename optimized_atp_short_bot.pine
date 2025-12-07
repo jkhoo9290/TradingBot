@@ -1,13 +1,11 @@
 //@version=5
-strategy(
-     title                = "ATP Short Bot + ADX TF (Optimized)",
-     overlay              = true,
-     pyramiding           = 0,
-     calc_on_every_tick   = false,
-     default_qty_type     = strategy.percent_of_equity,
-     default_qty_value    = 10,
-     initial_capital      = 10000
-)
+strategy(title="ATP Short Bot + ADX TF (Optimized)",
+         overlay=true,
+         pyramiding=0,
+         calc_on_every_tick=false,
+         default_qty_type=strategy.percent_of_equity,
+         default_qty_value=10,
+         initial_capital=10000)
 
 // === 输入参数 ===
 groupTrend      = "趋势与动量"
