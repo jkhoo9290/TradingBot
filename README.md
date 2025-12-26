@@ -1,4 +1,4 @@
-# 资金费率做空机器人（Binance U 本位合约 / CCXT）
+# 资金费率做空机器人（Bybit USDT 永续 / CCXT）
 
 > 目标：资金费率 **为正且很高** 时，尝试进场做空以获取 funding；并通过“强制风控”把爆仓风险降到极低。
 >
@@ -14,12 +14,12 @@
   - 按“止损距离”计算仓位，单笔最大亏损固定为权益的 X%
   - 开仓后 **必须** 成功挂出 `STOP_MARKET`（reduceOnly），否则立即市价平仓
   - 日内最大亏损/最大回撤触发熔断：停止开新仓
-- **默认 dry-run**：只打印拟执行动作，不会真实下单
+- **默认 dry-run**：只打印拟执行动作，不会真实下单（适合内测）
 
 ## 安装
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -U pip
 pip install -r requirements.txt
@@ -35,7 +35,7 @@ cp .env.example .env
 
 然后在 `.env` 里填写：
 
-- `BINANCE_API_KEY` / `BINANCE_API_SECRET`
+- `BYBIT_API_KEY` / `BYBIT_API_SECRET`
 - `DRY_RUN=true`（建议先保持 true）
 
 ## 运行
@@ -43,7 +43,33 @@ cp .env.example .env
 ```bash
 source .venv/bin/activate
 export $(grep -v '^#' .env | xargs)
-python -m funding_short_bot.cli
+python3 -m funding_short_bot.cli
+```
+
+## 内测（Bybit Testnet）
+
+- 把 `.env` 里的 `BYBIT_TESTNET=true` 保持开启
+- 先跑一遍只执行一次的 dry-run：
+
+```bash
+python3 -m funding_short_bot.cli --once
+```
+
+- 你确认日志中的 `qty/stop/tp` 都合理后，再用 testnet 真实下单（仍建议小杠杆小风险）：
+
+```bash
+python3 -m funding_short_bot.cli --once --live
+```
+
+## 如果你的运行环境访问 Bybit 返回 403（CloudFront）
+
+某些云环境会被 Bybit 的 CloudFront 地域策略拦截，导致 `403 Forbidden`。
+
+- 这不影响代码逻辑本身，但你需要换到能访问 Bybit 的网络/服务器运行；
+- 或者先用离线演示模式验证风控与仓位计算：
+
+```bash
+python3 -m funding_short_bot.cli --offline-demo
 ```
 
 ## 策略逻辑（简述）
